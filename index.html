@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LiteZ set-html & bind-class</title>
+  <style>
+    .active { background-color: yellow; }
+    .bold { font-weight: bold; }
+    .large { font-size: 20px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div set-html="htmlContent"></div>
+    <p bind-class="classString">String Class</p>
+    <p bind-class="classArray">Array Class</p>
+    <p bind-class="classObject">Object Class</p>
+    <button on:click="toggleActive">Toggle Active</button>
+  </div>
+
+  <script src="litez.js"></script>
+  <script>
+    LiteZ.createApp({
+      es: '#app',
+      data() {
+        return {
+          htmlContent: '<h1>Hello <em>World</em></h1>',
+          classString: 'bold',
+          classArray: ['bold', 'large'],
+          classObject: { active: true, bold: true, large: false },
+          isActive: true
+        };
+      },
+      methods: {
+        toggleActive() {
+          this.classObject.active = !this.classObject.active;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
