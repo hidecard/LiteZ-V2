@@ -1,38 +1,255 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>LiteZ set-html & bind-class</title>
-  <style>
-    .active { background-color: yellow; }
-    .bold { font-weight: bold; }
-    .large { font-size: 20px; }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiteZ Todo Example</title>
 </head>
 <body>
-  <div id="app">
-    <div set-html="htmlContent"></div>
-    <p bind-class="classString">String Class</p>
-    <p bind-class="classArray">Array Class</p>
-    <p bind-class="classObject">Object Class</p>
-    <button on:click="toggleActive">Toggle Active</button>
-  </div>
+  <div id="app"></div>
 
-  <script src="litez.js"></script>
   <script>
-    LiteZ.createApp({
+    const LiteZ = {
+      components: {},
+      component(name, options) {
+        this.components[name] = options;
+      },
+      createApp(options) {
+        return new LiteZApp(options);
+      }
+    };
+
+    class LiteZApp {
+      constructor(options) {
+        this.lifecycleHooks = {
+          onInit: options.onInit ? [options.onInit] : [],
+          onReady: options.onReady ? [options.onReady] : [],
+          onDisplay: options.onDisplay ? [options.onDisplay] : []
+        };
+
+        try {
+          this.emitLifecycle('onInit');
+          this.el = document.querySelector(options.es);
+          if (!this.el) throw new Error(`Element selector "${options.es}" not found`);
+          this.rawData = options.data ? options.data() : {};
+          this.data = this.reactive(this.rawData);
+          this.methods = options.methods || {};
+          this.template = options.template || this.el.innerHTML;
+          this.components = LiteZ.components;
+          this.componentInstances = new Map();
+          this.emitLifecycle('onReady');
+          this.render();
+          this.bindEvents();
+          this.emitLifecycle('onDisplay');
+        } catch (error) {
+          this.handleError(error, 'App setup failed');
+        }
+      }
+
+      reactive(data) {
+        const appInstance = this;
+        return new Proxy(data, {
+          get(target, key) {
+            if (typeof target[key] === 'object' && target[key] !== null) {
+              return new Proxy(target[key], this);
+            }
+            return Reflect.get(target, key);
+          },
+          set(target, key, value) {
+            const result = Reflect.set(target, key, value);
+            appInstance.update();
+            return result;
+          }
+        });
+      }
+
+      render() {
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(`<div>${this.template}</div>`, 'text/html');
+          const root = doc.body.firstChild;
+          if (root) {
+            Array.from(root.childNodes).forEach(child => this.processNode(child));
+            this.el.innerHTML = root.innerHTML;
+          }
+        } catch (error) {
+          this.handleError(error, 'Rendering failed');
+        }
+      }
+
+      processNode(node, componentData = null) {
+        if (!node) return;
+
+        if (node.nodeType === Node.TEXT_NODE) {
+          this.processTextContent(node, componentData || this.data);
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        if (node.hasAttribute('repeat')) {
+          const [itemVar, listVar] = node.getAttribute('repeat').split(' from ').map(s => s.trim());
+          const list = this.data[listVar] || [];
+          const parent = node.parentNode;
+          if (!parent) return;
+          const fragment = document.createDocumentFragment();
+          list.forEach((item, index) => {
+            const clone = node.cloneNode(true);
+            clone.removeAttribute('repeat');
+            this.processNode(clone, { [itemVar]: item, index });
+            fragment.appendChild(clone);
+          });
+          parent.replaceChild(fragment, node);
+          return;
+        }
+
+        if (node.hasAttribute('z-component')) {
+          this.processComponent(node, componentData);
+          return;
+        }
+
+        this.processAttributes(node);
+        Array.from(node.childNodes).forEach(child => this.processNode(child, componentData));
+      }
+
+      processComponent(node, parentData) {
+        const name = node.getAttribute('z-component');
+        const component = this.components[name];
+        if (!component) {
+          console.error(`Component "${name}" not found`);
+          return;
+        }
+        const props = {};
+        Array.from(node.attributes).forEach(attr => {
+          if (attr.name.startsWith('z-prop:')) {
+            const key = attr.name.replace('z-prop:', '');
+            props[key] = parentData ? parentData[attr.value] || attr.value : attr.value;
+          }
+        });
+
+        const compData = component.data ? component.data() : {};
+        Object.assign(compData, props);
+        const reactiveData = this.reactive(compData);
+        const instance = { data: reactiveData, methods: component.methods || {} };
+        const instanceId = `${name}-${Math.random().toString(36).substr(2, 9)}`;
+        this.componentInstances.set(instanceId, instance);
+
+        const compDoc = new DOMParser().parseFromString(component.template, 'text/html');
+        const compRoot = compDoc.body.firstChild;
+        if (!compRoot || !node.parentNode) return;
+        compRoot.setAttribute('data-component', instanceId);
+        this.processNode(compRoot, reactiveData);
+        node.parentNode.replaceChild(compRoot, node);
+      }
+
+      processAttributes(node) {
+        Array.from(node.attributes).forEach(attr => {
+          if (attr.name.startsWith('bind:')) {
+            const attrName = attr.name.replace('bind:', '');
+            const value = this.data[attr.value] || attr.value;
+            node.setAttribute(attrName, value);
+            node.removeAttribute(attr.name);
+          }
+        });
+      }
+
+      processTextContent(node, data) {
+        let text = node.textContent;
+        const matches = text.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g);
+        if (matches) {
+          matches.forEach(match => {
+            const expression = match.slice(1).trim();
+            try {
+              const fn = new Function('data', `with (data) { return ${expression}; }`);
+              text = text.replace(match, fn(data) || '');
+            } catch (e) {
+              this.handleError(e, `Text binding failed: ${expression}`);
+              text = text.replace(match, '');
+            }
+          });
+          node.textContent = text;
+        }
+      }
+
+      update() {
+        this.render();
+        this.bindEvents();
+      }
+
+      bindEvents() {
+        const elements = this.el.querySelectorAll('[on\\:click]');
+        elements.forEach(el => {
+          const eventAttrs = Array.from(el.attributes).filter(attr => attr.name.startsWith('on:'));
+          eventAttrs.forEach(attr => {
+            const eventName = attr.name.split(':')[1];
+            const methodName = attr.value;
+            const parentNode = el.closest('[data-component]');
+            if (parentNode) {
+              const instanceId = parentNode.getAttribute('data-component');
+              const instance = this.componentInstances.get(instanceId);
+              if (instance && instance.methods[methodName]) {
+                el.removeEventListener(eventName, instance.methods[methodName]);
+                // Bind the method with the component's reactive data as context
+                const boundMethod = instance.methods[methodName].bind(instance.data);
+                el.addEventListener(eventName, boundMethod);
+              }
+            } else if (this.methods[methodName]) {
+              el.removeEventListener(eventName, this.methods[methodName]);
+              // Bind the method with the app instance as context
+              const boundMethod = this.methods[methodName].bind(this);
+              el.addEventListener(eventName, boundMethod);
+            }
+          });
+        });
+      }
+
+      handleError(error, context) {
+        console.error(`[${context}]: ${error.message}`);
+        this.rawData.error = { message: error.message, context };
+      }
+
+      emitLifecycle(hookName) {
+        if (this.lifecycleHooks[hookName]) {
+          this.lifecycleHooks[hookName].forEach(callback => callback.call(this));
+        }
+      }
+    }
+
+    window.LiteZ = LiteZ;
+
+    // Define the todo-item component
+    LiteZ.component('todo-item', {
+      template: '<li>$text <button on:click="remove">X</button></li>',
+      data() { return { text: '' }; },
+      methods: {
+        remove() {
+          this.text = 'Removed'; // This should now work with proper binding
+        }
+      }
+    });
+
+    // Create the app
+    const app = LiteZ.createApp({
       es: '#app',
       data() {
         return {
-          htmlContent: '<h1>Hello <em>World</em></h1>',
-          classString: 'bold',
-          classArray: ['bold', 'large'],
-          classObject: { active: true, bold: true, large: false },
-          isActive: true
+          message: 'Hello LiteZ',
+          items: ['Apple', 'Banana']
         };
       },
+      template: `
+        <div>
+          <h1>$message</h1>
+          <button on:click="updateMessage">Update Message</button>
+          <ul>
+            <li repeat="item from items">
+              <z-component z-component="todo-item" z-prop:text="item"></z-component>
+            </li>
+          </ul>
+        </div>
+      `,
       methods: {
-        toggleActive() {
-          this.classObject.active = !this.classObject.active;
+        updateMessage() {
+          this.data.message = 'Updated!';
         }
       }
     });
