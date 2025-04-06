@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LiteZ Todo App</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .todo-item { padding: 10px; border-bottom: 1px solid #ddd; }
+    .completed { text-decoration: line-through; color: #888; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Assuming LiteZ is included here -->
+  <script src="./litez.js"></script>
+
+  <script>
+    // Internationalization
+    LiteZ.i18n.setLocale("en", {
+      appTitle: "Todo List",
+      addTodo: "Add Todo",
+      placeholder: "Enter a new todo",
+      completed: "Completed",
+      themeToggle: "Toggle Theme",
+    });
+    LiteZ.i18n.setLocale("my", {
+      appTitle: "လုပ်စရာစာရင်း",
+      addTodo: "လုပ်စရာထည့်ပါ",
+      placeholder: "လုပ်စရာအသစ်ရေးပါ",
+      completed: "ပြီးပြီ",
+      themeToggle: "အရောင်ပြောင်းပါ",
+    });
+
+    // Store for global state
+    const store = LiteZ.store({
+      state: { todos: [], theme: "light", locale: "en" },
+      mutations: {
+        addTodo(state, todo) { state.todos.push(todo); },
+        toggleTodo(state, id) {
+          const todo = state.todos.find(t => t.id === id);
+          if (todo) todo.completed = !todo.completed;
+        },
+        setTheme(state, theme) { state.theme = theme; },
+        setLocale(state, locale) { state.locale = locale; },
+      },
+      actions: {
+        addTodo({ commit }, text) {
+          commit("addTodo", { id: Date.now(), text, completed: false });
+        },
+      },
+      getters: {
+        completedCount: (state) => state.todos.filter(t => t.completed).length,
+      },
+    });
+
+    // Todo Item Component
+    LiteZ.component("TodoItem", {
+      template: `
+        <div class="todo-item" :class="{ completed: props.todo.completed }">
+          <input type="checkbox" data-z-model="props.todo.completed" @change="toggle">
+          <span data-set-text="props.todo.text"></span>
+        </div>
+      `,
+      props: { todo: { type: Object, required: true } },
+      methods: {
+        toggle() { store.commit("toggleTodo", this.props.get().todo.id); },
+      },
+    });
+
+    // Main App
+    const app = LiteZ.createApp({
+      template: `
+        <div :class="{ dark: store.state.get().theme === 'dark' }">
+          <h1 data-set-text="LiteZ.i18n.t('appTitle')"></h1>
+          
+          <!-- Input for new todo -->
+          <input data-z-model="state.newTodo" :placeholder="LiteZ.i18n.t('placeholder')" @keyup.enter="addTodo">
+          <button @click="addTodo">{{ LiteZ.i18n.t('addTodo') }}</button>
+          
+          <!-- Todo List -->
+          <div data-z-for="todo in store.state.get().todos">
+            <TodoItem :todo="todo"></TodoItem>
+          </div>
+          
+          <!-- Stats and Controls -->
+          <p data-z-show="store.getters.completedCount.value > 0">
+            {{ LiteZ.i18n.t('completed') }}: {{ store.getters.completedCount.value }} / {{ store.state.get().todos.length }}
+          </p>
+          <button @click="toggleTheme">{{ LiteZ.i18n.t('themeToggle') }}</button>
+          <select data-z-model="store.state.get().locale" @change="changeLocale">
+            <option value="en">English</option>
+            <option value="my">မြန်မာ</option>
+          </select>
+        </div>
+      `,
+      data: () => ({ newTodo: "" }),
+      methods: {
+        addTodo() {
+          if (this.state.get().newTodo.trim()) {
+            store.dispatch("addTodo", this.state.get().newTodo);
+            this.state.set("newTodo", "");
+          }
+        },
+        toggleTheme() {
+          const current = store.state.get().theme;
+          store.commit("setTheme", current === "light" ? "dark" : "light");
+        },
+        changeLocale(e) {
+          store.commit("setLocale", e.target.value);
+          LiteZ.i18n.locale = e.target.value;
+        },
+      },
+      on: {
+        mount() {
+          document.body.style.background = store.state.get().theme === "light" ? "#fff" : "#333";
+          document.body.style.color = store.state.get().theme === "light" ? "#000" : "#fff";
+          store.state.onChange(() => {
+            document.body.style.background = store.state.get().theme === "light" ? "#fff" : "#333";
+            document.body.style.color = store.state.get().theme === "light" ? "#000" : "#fff";
+          });
+        },
+      },
+    });
+
+    // Mount the app
+    app.mount("#app");
+
+    // Router (optional, for demonstration)
+    LiteZ.router({
+      "/": { component: "TodoItem", props: { todo: { id: 0, text: "Sample", completed: false } } },
+    }, "#app");
+  </script>
+</body>
+</html>

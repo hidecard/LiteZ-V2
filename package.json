@@ -1,0 +1,14 @@
+{
+  "name": "litez-v2-demo",
+  "version": "1.0.0",
+  "description": "LiteZ-V2 Full Stack Framework Demo",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.7"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}
